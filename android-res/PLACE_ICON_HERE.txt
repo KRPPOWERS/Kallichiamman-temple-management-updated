@@ -1,0 +1,9 @@
+Place your custom app icon here.
+
+Requirements:
+- Filename: ic_launcher.png
+- Size: 512 x 512 pixels
+- Format: PNG
+- Background: Not transparent (Android needs a solid background)
+
+If this file is not present, the default Capacitor icon will be used.

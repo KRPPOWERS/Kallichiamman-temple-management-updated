@@ -1,0 +1,30 @@
+{
+  "appId": "com.ammantemple.management",
+  "appName": "Amman Temple",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false,
+    "loggingBehavior": "none",
+    "buildOptions": {
+      "keystorePath": null,
+      "keystoreAlias": null
+    }
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#1e1810",
+      "androidSpinnerStyle": "large",
+      "spinnerColor": "#c9922a",
+      "showSpinner": true,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    }
+  }
+}
