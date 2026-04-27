@@ -4,17 +4,18 @@
   "webDir": "www",
   "server": {
     "androidScheme": "https",
-    "cleartext": true
+    "cleartext": true,
+    "allowNavigation": [
+      "script.google.com",
+      "*.google.com",
+      "*.googleapis.com"
+    ]
   },
   "android": {
     "allowMixedContent": true,
     "captureInput": true,
     "webContentsDebuggingEnabled": false,
-    "loggingBehavior": "none",
-    "buildOptions": {
-      "keystorePath": null,
-      "keystoreAlias": null
-    }
+    "loggingBehavior": "none"
   },
   "plugins": {
     "SplashScreen": {
