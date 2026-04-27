@@ -491,6 +491,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- SUBSCRIPTIONS -->
     <div class="page" id="page-subscriptions">
       <div class="page-title">🔄 Subscription Management</div>
+      <!-- Sync banner — always visible on this page -->
+      <div id="sub-sync-banner" style="display:flex;align-items:center;justify-content:space-between;background:rgba(201,146,42,.12);border:1px solid rgba(201,146,42,.3);border-radius:8px;padding:10px 16px;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <span id="sub-sync-msg" style="font-size:13px;color:var(--gold)">⏳ Loading latest data from Google Sheets...</span>
+        <button class="btn btn-gold btn-sm" onclick="subForceSync()" style="min-width:130px">🔄 Sync Now</button>
+      </div>
       <div class="card-grid cols-4" style="margin-bottom:20px">
         <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value" id="sub-stat-total">0</div><div class="stat-label">Total Subscribers</div></div>
         <div class="stat-card"><div class="stat-icon">💚</div><div class="stat-value" id="sub-stat-active">0</div><div class="stat-label">Active Subscribers</div></div>
@@ -572,6 +577,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-end">
             <div><label>Month</label><input type="month" id="sub-status-month" onchange="renderSubStatus()" style="width:160px"/></div>
             <input placeholder="Search subscriber..." id="sub-status-search" oninput="renderSubStatus()" style="max-width:200px"/>
+            <button class="btn btn-gold btn-sm" onclick="subForceSync()" title="Pull latest from Google Sheets">🔄 Sync</button>
             <button class="btn btn-outline btn-sm" onclick="exportSubStatusExcel()">📊 Excel</button>
           </div>
           <div class="table-wrap">
@@ -1228,7 +1234,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ============================
 // GOOGLE SHEETS CONFIG
 // ============================
-const GSHEET_URL = 'https://script.google.com/macros/s/AKfycbx_NJVOQg3c0h0u1C0UBbvYUqFNVJMwJjyqG8nqFbjQKHsutzG3X8k8M9ZZP10DwZ_AWQ/exec';
+const GSHEET_URL = 'https://script.google.com/macros/s/AKfycbwDLBmwYnwuO-XAMLqoijgd132tQHcPHmY70YvB9Oq1Z_ISkDwudY5pjObCaCi22RqCEQ/exec';
 const GSHEET_SYNC_ON_SAVE = true; // auto-sync on every save
 
 // ============================
@@ -1313,9 +1319,9 @@ function setRole(role) {
   // Start 30-second background sync — full bidirectional merge
   if(!window._syncInterval) {
     window._syncInterval = setInterval(()=>{
-      if(!currentRole || !navigator.onLine) return;
-      // Don't background-sync if a manual sync is in progress
-      if(window._syncDebounce) return;
+      if(!currentRole) return;               // not logged in — skip
+      if(window._syncDebounce) return;       // manual sync already queued — skip
+      // navigator.onLine NOT checked — unreliable on Android WebView
       fetch(GSHEET_URL+'?action=pull')
         .then(r=>r.json())
         .then(sheetData=>{
@@ -1422,7 +1428,11 @@ function showPage(id) {
   closeSidebar();
   if(id==='dashboard') refreshDashboard();
   if(id==='donations'){renderDonationTable();populateDonationTypeSelects();document.getElementById('rpt-don-date').value=today();}
-  if(id==='subscriptions') refreshSubscriptions();
+  if(id==='subscriptions') {
+    refreshSubscriptions();
+    // Always pull fresh data from Sheets when opening this page
+    subForceSync();
+  }
   if(id==='inventory') renderInventory();
   if(id==='expenses'){renderExpenseCategories();renderExpenses();}
   if(id==='assets') renderAssets();
@@ -2139,14 +2149,12 @@ const ALL_SYNC_TABLES = [
 ];
 
 function fullSync(onDone) {
-  if(!navigator.onLine) {
-    updateSyncUI(false);
-    if(onDone) onDone();
-    return;
-  }
+  // NOTE: navigator.onLine is NOT checked here — it is unreliable in Android
+  // WebView (often returns false even with full internet). We always attempt
+  // the fetch and handle failure gracefully in the catch block.
   updateSyncUI('syncing');
 
-  fetch(GSHEET_URL+'?action=pull')
+  fetch(GSHEET_URL+'?action=pull', {mode:'cors'})
     .then(r=>r.json())
     .then(sheetData=>{
       if(sheetData && sheetData.donations !== undefined) {
@@ -2234,9 +2242,9 @@ function updateSyncUI(state){
 
 // Called after every DB.set() — do full bidirectional sync immediately
 function triggerAutoSync(){
-  if(!GSHEET_SYNC_ON_SAVE || !navigator.onLine) return;
+  if(!GSHEET_SYNC_ON_SAVE) return;
+  // navigator.onLine NOT checked — unreliable on Android WebView
   updateSyncUI('syncing');
-  // Debounce: batch rapid consecutive saves into one sync (800ms window)
   clearTimeout(window._syncDebounce);
   window._syncDebounce = setTimeout(()=>{
     window._syncDebounce = null;
@@ -3063,6 +3071,67 @@ document.addEventListener('click',e=>{
   const ac=document.getElementById('sub-autocomplete');
   if(ac&&!e.target.closest('.autocomplete-wrap')) ac.style.display='none';
 });
+
+// ============================
+// SUBSCRIPTION SYNC HELPERS
+// ============================
+
+// Pull-only sync specifically for the subscriptions page.
+// Does a full bidirectional sync then re-renders the subscriptions UI.
+function subForceSync() {
+  updateSubSyncBanner('syncing');
+  // Always call fullSync regardless of navigator.onLine
+  fetch(GSHEET_URL + '?action=pull', {mode: 'cors'})
+    .then(r => r.json())
+    .then(sheetData => {
+      if (!sheetData || sheetData.subscribers === undefined) {
+        updateSubSyncBanner('error', 'Could not read subscriber data from Sheets.');
+        return;
+      }
+      // Apply subscriber + sub_payments data from Sheets
+      const deletedIDs = mergeDeletedIDs(getDeletedIDs(), sheetData.deleted_ids || {});
+      localStorage.setItem('tms_deleted_ids', JSON.stringify(deletedIDs));
+
+      const mergedSubs = mergeByID(DB.get('subscribers'), sheetData.subscribers || [], true, deletedIDs);
+      const mergedPay  = mergeByID(DB.get('sub_payments'), sheetData.sub_payments || [], false, deletedIDs);
+      localStorage.setItem('tms_subscribers',  JSON.stringify(mergedSubs));
+      localStorage.setItem('tms_sub_payments', JSON.stringify(mergedPay));
+
+      // Also merge donation_types
+      if (Array.isArray(sheetData.donation_types) && sheetData.donation_types.length) {
+        const mergedTypes = Array.from(new Set([...sheetData.donation_types, ...DB.get('donation_types')]));
+        localStorage.setItem('tms_donation_types', JSON.stringify(mergedTypes));
+      }
+
+      // Re-render subscriptions UI with fresh data
+      refreshSubscriptions();
+      const sm = document.getElementById('sub-status-month');
+      if (sm && sm.value) renderSubStatus();
+
+      const now = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      updateSubSyncBanner('ok', '✅ Synced at ' + now + ' — ' + mergedSubs.length + ' subscribers loaded');
+      localStorage.setItem('tms_last_sync', new Date().toISOString());
+      updateSyncUI(true);
+    })
+    .catch(err => {
+      updateSubSyncBanner('error', '⚠️ Sync failed: ' + (err.message || 'No internet?') + ' — Showing local data.');
+    });
+}
+
+function updateSubSyncBanner(state, msg) {
+  const el = document.getElementById('sub-sync-msg');
+  if (!el) return;
+  if (state === 'syncing') {
+    el.style.color = 'var(--gold)';
+    el.textContent = '⏳ Pulling latest data from Google Sheets...';
+  } else if (state === 'ok') {
+    el.style.color = '#2ecc71';
+    el.textContent = msg || '✅ Synced';
+  } else {
+    el.style.color = '#e74c3c';
+    el.textContent = msg || '⚠️ Could not sync';
+  }
+}
 
 // ============================
 // SUBSCRIPTION RECEIPT — CANVAS
